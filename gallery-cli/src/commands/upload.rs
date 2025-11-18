@@ -1,7 +1,9 @@
 use anyhow::Result;
 use gallery_core::{AlbumManifest, ImageInfo, S3Client};
+use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -26,14 +28,23 @@ pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result
         anyhow::bail!("No images found in the provided paths");
     }
 
-    tracing::info!("Found {} images to process", image_paths.len());
+    println!("Found {} images to process\n", image_paths.len());
+
+    // Create progress bar for image processing
+    let process_pb = ProgressBar::new(image_paths.len() as u64);
+    process_pb.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
+            .expect("Invalid progress bar template")
+            .progress_chars("█▓▒░ "),
+    );
+    process_pb.set_message("Processing images...");
 
     // Process images in parallel using rayon (CPU-bound work)
-    tracing::info!("Processing images in parallel...");
+    let pb = Arc::new(process_pb);
     let processed_results: Vec<_> = image_paths
         .par_iter()
-        .enumerate()
-        .map(|(index, path)| {
+        .map(|path| {
             let image_id = Uuid::new_v4().to_string();
             let filename = path
                 .file_name()
@@ -41,20 +52,27 @@ pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result
                 .to_string_lossy()
                 .to_string();
 
-            tracing::info!(
-                "[{}/{}] Processing: {}",
-                index + 1,
-                image_paths.len(),
-                filename
-            );
-
             let processed = process_image(path)?;
+
+            pb.inc(1);
+            pb.set_message(format!("Processed: {}", filename));
 
             Ok::<_, anyhow::Error>((image_id, filename, processed))
         })
         .collect::<Result<Vec<_>>>()?;
 
-    tracing::info!("All images processed. Uploading to S3 concurrently...");
+    pb.finish_with_message("All images processed");
+    println!();
+
+    // Create progress bar for uploading
+    let upload_pb = ProgressBar::new(processed_results.len() as u64);
+    upload_pb.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.green/blue} {pos}/{len} {msg}")
+            .expect("Invalid progress bar template")
+            .progress_chars("█▓▒░ "),
+    );
+    upload_pb.set_message("Uploading to S3...");
 
     // Upload all images concurrently using tokio (I/O-bound work)
     let mut upload_tasks = Vec::new();
@@ -62,10 +80,14 @@ pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result
     for (image_id, filename, processed) in processed_results {
         let s3_clone = s3.clone();
         let album_id_clone = album_id.clone();
+        let pb_clone = upload_pb.clone();
 
         // Spawn concurrent upload task
         let task = tokio::spawn(async move {
-            upload_image_to_s3(s3_clone, album_id_clone, image_id, filename, processed).await
+            let result = upload_image_to_s3(s3_clone, album_id_clone, image_id, filename.clone(), processed).await;
+            pb_clone.inc(1);
+            pb_clone.set_message(format!("Uploaded: {}", filename));
+            result
         });
 
         upload_tasks.push(task);
@@ -76,6 +98,9 @@ pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result
         let image_info = task.await??;
         manifest.add_image(image_info);
     }
+
+    upload_pb.finish_with_message("All images uploaded");
+    println!();
 
     // Upload manifest
     tracing::info!("Uploading manifest...");
@@ -110,8 +135,6 @@ async fn upload_image_to_s3(
     // Upload thumbnail
     let thumbnail_key = format!("{}/thumbnails/{}.jpg", album_id, image_id);
     s3.upload_bytes(processed.thumbnail, &thumbnail_key).await?;
-
-    tracing::info!("✓ Uploaded: {}", filename);
 
     Ok(ImageInfo::new(
         filename,

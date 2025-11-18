@@ -49,5 +49,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Parallel processing
 rayon = "1.10"
 
+# Progress bars
+indicatif = { version = "0.17", features = ["rayon"] }
+
 # Misc
 walkdir = "2.5"
