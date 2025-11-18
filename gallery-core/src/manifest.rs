@@ -15,6 +15,7 @@ pub struct ImageInfo {
     pub original_filename: String,
     pub width: u32,
     pub height: u32,
+    pub file_hash: String,
     pub thumbnail_path: String,
     pub preview_path: String,
     pub original_path: String,
@@ -24,6 +25,15 @@ impl AlbumManifest {
     pub fn new(name: String) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
+            name,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            images: Vec::new(),
+        }
+    }
+
+    pub fn with_id(name: String, id: String) -> Self {
+        Self {
+            id,
             name,
             created_at: chrono::Utc::now().to_rfc3339(),
             images: Vec::new(),
@@ -48,6 +58,7 @@ impl ImageInfo {
         original_filename: String,
         width: u32,
         height: u32,
+        file_hash: String,
         _album_id: &str,
         image_id: &str,
     ) -> Self {
@@ -56,6 +67,7 @@ impl ImageInfo {
             original_filename,
             width,
             height,
+            file_hash,
             thumbnail_path: format!("thumbnails/{}.jpg", image_id),
             preview_path: format!("previews/{}.jpg", image_id),
             original_path: format!("originals/{}.jpg", image_id),
