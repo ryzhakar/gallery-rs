@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use aws_sdk_s3::{
-    primitives::ByteStream,
+    primitives::{ByteStream, DateTime},
     Client,
 };
 use std::path::Path;
@@ -57,17 +57,23 @@ impl S3Client {
     }
 
     /// Upload bytes to S3
-    pub async fn upload_bytes(&self, data: Vec<u8>, s3_key: &str) -> Result<()> {
+    pub async fn upload_bytes(&self, data: Vec<u8>, s3_key: &str, expires: Option<DateTime>) -> Result<()> {
         tracing::debug!("S3 PUT (bytes): bucket={}, key={}, size={} bytes", self.bucket, s3_key, data.len());
 
         let body = ByteStream::from(data);
 
-        self.client
+        let mut request = self.client
             .put_object()
             .bucket(&self.bucket)
             .key(s3_key)
             .body(body)
-            .content_type(Self::guess_content_type(s3_key))
+            .content_type(Self::guess_content_type(s3_key));
+
+        if let Some(expires_at) = expires {
+            request = request.expires(expires_at);
+        }
+
+        request
             .send()
             .await
             .context("Failed to upload to S3")?;

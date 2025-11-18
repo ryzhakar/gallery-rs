@@ -28,6 +28,10 @@ enum Commands {
         /// S3 bucket name
         #[arg(short, long, env = "GALLERY_BUCKET")]
         bucket: String,
+
+        /// Days until gallery expires (default: 7)
+        #[arg(long, default_value = "7")]
+        expires_in_days: u32,
     },
 
     /// Delete an album
@@ -55,8 +59,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Upload { paths, name, bucket } => {
-            commands::upload::execute(paths, name, bucket).await?;
+        Commands::Upload { paths, name, bucket, expires_in_days } => {
+            commands::upload::execute(paths, name, bucket, expires_in_days).await?;
         }
         Commands::Delete { album_id, bucket } => {
             commands::delete::execute(album_id, bucket).await?;
