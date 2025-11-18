@@ -36,6 +36,8 @@ impl S3Client {
 
     /// Upload a file to S3
     pub async fn upload_file(&self, local_path: &Path, s3_key: &str) -> Result<()> {
+        tracing::debug!("S3 PUT: bucket={}, key={}, local_path={:?}", self.bucket, s3_key, local_path);
+
         let body = ByteStream::from_path(local_path)
             .await
             .context("Failed to read file")?;
@@ -50,11 +52,14 @@ impl S3Client {
             .await
             .context("Failed to upload to S3")?;
 
+        tracing::debug!("S3 PUT success: key={}", s3_key);
         Ok(())
     }
 
     /// Upload bytes to S3
     pub async fn upload_bytes(&self, data: Vec<u8>, s3_key: &str) -> Result<()> {
+        tracing::debug!("S3 PUT (bytes): bucket={}, key={}, size={} bytes", self.bucket, s3_key, data.len());
+
         let body = ByteStream::from(data);
 
         self.client
@@ -67,11 +72,14 @@ impl S3Client {
             .await
             .context("Failed to upload to S3")?;
 
+        tracing::debug!("S3 PUT (bytes) success: key={}", s3_key);
         Ok(())
     }
 
     /// Download a file from S3
     pub async fn download_file(&self, s3_key: &str) -> Result<Vec<u8>> {
+        tracing::debug!("S3 GET: bucket={}, key={}", self.bucket, s3_key);
+
         let response = self.client
             .get_object()
             .bucket(&self.bucket)
@@ -86,7 +94,9 @@ impl S3Client {
             .await
             .context("Failed to read S3 object body")?;
 
-        Ok(data.to_vec())
+        let bytes = data.to_vec();
+        tracing::debug!("S3 GET success: key={}, size={} bytes", s3_key, bytes.len());
+        Ok(bytes)
     }
 
     /// Delete all objects with a prefix (album deletion)

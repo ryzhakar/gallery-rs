@@ -51,13 +51,18 @@ pub async fn gallery(
     State(state): State<AppState>,
     Path(album_id): Path<String>,
 ) -> Result<Html<String>, StatusCode> {
+    tracing::info!("Gallery page request: album_id={}", album_id);
+
     // Verify album exists by checking manifest
     let manifest_key = format!("{}/manifest.json", album_id);
     let manifest_data = state
         .s3
         .download_file(&manifest_key)
         .await
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|e| {
+            tracing::error!("Failed to fetch manifest for album {}: {:?}", album_id, e);
+            StatusCode::NOT_FOUND
+        })?;
 
     let manifest_json = String::from_utf8(manifest_data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let manifest: AlbumManifest =
@@ -74,12 +79,17 @@ pub async fn get_manifest(
     State(state): State<AppState>,
     Path(album_id): Path<String>,
 ) -> Result<Json<AlbumManifest>, StatusCode> {
+    tracing::info!("Manifest API request: album_id={}", album_id);
+
     let manifest_key = format!("{}/manifest.json", album_id);
     let manifest_data = state
         .s3
         .download_file(&manifest_key)
         .await
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|e| {
+            tracing::error!("Failed to fetch manifest for album {}: {:?}", album_id, e);
+            StatusCode::NOT_FOUND
+        })?;
 
     let manifest_json = String::from_utf8(manifest_data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let manifest: AlbumManifest =
@@ -93,13 +103,19 @@ pub async fn get_image(
     State(state): State<AppState>,
     Path((album_id, path)): Path<(String, String)>,
 ) -> Result<Response, StatusCode> {
+    tracing::info!("Image request: album_id={}, path={}", album_id, path);
+
     let s3_key = format!("{}/{}", album_id, path);
+    tracing::debug!("Computed S3 key: {}", s3_key);
 
     let image_data = state
         .s3
         .download_file(&s3_key)
         .await
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|e| {
+            tracing::error!("Failed to fetch image {}: {:?}", s3_key, e);
+            StatusCode::NOT_FOUND
+        })?;
 
     // Determine content type
     let content_type = if path.ends_with(".jpg") || path.ends_with(".jpeg") {
@@ -110,6 +126,7 @@ pub async fn get_image(
         "application/octet-stream"
     };
 
+    tracing::debug!("Serving image: s3_key={}, content_type={}, size={} bytes", s3_key, content_type, image_data.len());
     Ok(([(header::CONTENT_TYPE, content_type)], image_data).into_response())
 }
 

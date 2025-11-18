@@ -7,7 +7,7 @@ use axum::{
     Router,
 };
 use std::env;
-use tower_http::cors::CorsLayer;
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::state::AppState;
@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "gallery_web=info,tower_http=debug".into()),
+                .unwrap_or_else(|_| "gallery_web=info,gallery_core=debug,tower_http=debug".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -38,6 +38,7 @@ async fn main() -> Result<()> {
         .route("/api/album/:album_id/manifest", get(handlers::get_manifest))
         .route("/api/album/:album_id/image/*path", get(handlers::get_image))
         .layer(CorsLayer::permissive())
+        .layer(TraceLayer::new_for_http())
         .with_state(state);
 
     // Start server
