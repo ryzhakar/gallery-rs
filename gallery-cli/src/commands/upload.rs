@@ -1,10 +1,11 @@
 use anyhow::Result;
 use gallery_core::{AlbumManifest, ImageInfo, S3Client};
+use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
-use crate::image_processor::{is_image_file, process_image};
+use crate::image_processor::{is_image_file, process_image, ProcessedImage};
 
 pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result<()> {
     tracing::info!("Creating album: {}", name);
@@ -27,49 +28,53 @@ pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result
 
     tracing::info!("Found {} images to process", image_paths.len());
 
-    // Process and upload each image
-    for (index, path) in image_paths.iter().enumerate() {
-        let image_id = Uuid::new_v4().to_string();
+    // Process images in parallel using rayon (CPU-bound work)
+    tracing::info!("Processing images in parallel...");
+    let processed_results: Vec<_> = image_paths
+        .par_iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let image_id = Uuid::new_v4().to_string();
+            let filename = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
 
-        tracing::info!(
-            "[{}/{}] Processing: {}",
-            index + 1,
-            image_paths.len(),
-            path.display()
-        );
+            tracing::info!(
+                "[{}/{}] Processing: {}",
+                index + 1,
+                image_paths.len(),
+                filename
+            );
 
-        // Process image (resize, thumbnails, etc.)
-        let processed = process_image(path)?;
+            let processed = process_image(path)?;
 
-        // Upload original
-        let original_key = format!("{}/originals/{}.jpg", album_id, image_id);
-        tracing::info!("  Uploading original...");
-        s3.upload_bytes(processed.original, &original_key).await?;
+            Ok::<_, anyhow::Error>((image_id, filename, processed))
+        })
+        .collect::<Result<Vec<_>>>()?;
 
-        // Upload preview
-        let preview_key = format!("{}/previews/{}.jpg", album_id, image_id);
-        tracing::info!("  Uploading preview...");
-        s3.upload_bytes(processed.preview, &preview_key).await?;
+    tracing::info!("All images processed. Uploading to S3 concurrently...");
 
-        // Upload thumbnail
-        let thumbnail_key = format!("{}/thumbnails/{}.jpg", album_id, image_id);
-        tracing::info!("  Uploading thumbnail...");
-        s3.upload_bytes(processed.thumbnail, &thumbnail_key).await?;
+    // Upload all images concurrently using tokio (I/O-bound work)
+    let mut upload_tasks = Vec::new();
 
-        // Add to manifest
-        let filename = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
+    for (image_id, filename, processed) in processed_results {
+        let s3_clone = s3.clone();
+        let album_id_clone = album_id.clone();
 
-        manifest.add_image(ImageInfo::new(
-            filename,
-            processed.width,
-            processed.height,
-            &album_id,
-            &image_id,
-        ));
+        // Spawn concurrent upload task
+        let task = tokio::spawn(async move {
+            upload_image_to_s3(s3_clone, album_id_clone, image_id, filename, processed).await
+        });
+
+        upload_tasks.push(task);
+    }
+
+    // Wait for all uploads to complete and collect results
+    for task in upload_tasks {
+        let image_info = task.await??;
+        manifest.add_image(image_info);
     }
 
     // Upload manifest
@@ -85,6 +90,36 @@ pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result
     println!("\nAccess your gallery at: https://your-domain.com/gallery/{}", album_id);
 
     Ok(())
+}
+
+async fn upload_image_to_s3(
+    s3: S3Client,
+    album_id: String,
+    image_id: String,
+    filename: String,
+    processed: ProcessedImage,
+) -> Result<ImageInfo> {
+    // Upload original
+    let original_key = format!("{}/originals/{}.jpg", album_id, image_id);
+    s3.upload_bytes(processed.original, &original_key).await?;
+
+    // Upload preview
+    let preview_key = format!("{}/previews/{}.jpg", album_id, image_id);
+    s3.upload_bytes(processed.preview, &preview_key).await?;
+
+    // Upload thumbnail
+    let thumbnail_key = format!("{}/thumbnails/{}.jpg", album_id, image_id);
+    s3.upload_bytes(processed.thumbnail, &thumbnail_key).await?;
+
+    tracing::info!("✓ Uploaded: {}", filename);
+
+    Ok(ImageInfo::new(
+        filename,
+        processed.width,
+        processed.height,
+        &album_id,
+        &image_id,
+    ))
 }
 
 fn collect_image_paths(paths: Vec<String>) -> Result<Vec<PathBuf>> {
