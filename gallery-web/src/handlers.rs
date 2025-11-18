@@ -220,20 +220,23 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.95);
+            background: rgba(0, 0, 0, 0.97);
             z-index: 1000;
             align-items: center;
             justify-content: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
         }}
 
         .lightbox.active {{
             display: flex;
+            opacity: 1;
         }}
 
         .lightbox-content {{
             position: relative;
-            max-width: 95%;
-            max-height: 95%;
+            max-width: 90%;
+            max-height: 90%;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -241,10 +244,60 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
 
         .lightbox-image {{
             max-width: 100%;
-            max-height: 95vh;
+            max-height: 90vh;
             object-fit: contain;
+            user-select: none;
         }}
 
+        /* Navigation arrows */
+        .nav-btn {{
+            position: fixed;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            width: 60px;
+            height: 60px;
+            cursor: pointer;
+            font-size: 2rem;
+            color: white;
+            border-radius: 50%;
+            z-index: 1001;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }}
+
+        .nav-btn:hover {{
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-50%) scale(1.1);
+        }}
+
+        .nav-btn:active {{
+            transform: translateY(-50%) scale(0.95);
+        }}
+
+        .nav-btn.prev {{
+            left: 20px;
+        }}
+
+        .nav-btn.next {{
+            right: 20px;
+        }}
+
+        .nav-btn:disabled {{
+            opacity: 0.3;
+            cursor: not-allowed;
+        }}
+
+        .nav-btn:disabled:hover {{
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.1);
+        }}
+
+        /* Top controls */
         .lightbox-controls {{
             position: fixed;
             top: 20px;
@@ -255,40 +308,60 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
         }}
 
         .lightbox-btn {{
-            background: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.1);
             border: none;
             padding: 12px 20px;
             cursor: pointer;
-            font-size: 1rem;
-            border-radius: 4px;
-            transition: background 0.2s;
+            font-size: 0.9rem;
+            color: white;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(10px);
+            font-weight: 500;
         }}
 
         .lightbox-btn:hover {{
-            background: #fff;
+            background: rgba(255, 255, 255, 0.2);
         }}
 
         .close-btn {{
             position: fixed;
             top: 20px;
             left: 20px;
-            background: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.1);
             border: none;
-            width: 40px;
-            height: 40px;
+            width: 44px;
+            height: 44px;
             cursor: pointer;
             font-size: 1.5rem;
-            border-radius: 4px;
+            color: white;
+            border-radius: 6px;
             z-index: 1001;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }}
 
         .close-btn:hover {{
-            background: #fff;
+            background: rgba(255, 255, 255, 0.2);
         }}
 
-        .loading {{
-            color: #fff;
-            font-size: 1.2rem;
+        /* Image counter */
+        .image-counter {{
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.1);
+            padding: 8px 20px;
+            border-radius: 20px;
+            color: white;
+            font-size: 0.9rem;
+            z-index: 1001;
+            backdrop-filter: blur(10px);
+            font-weight: 500;
         }}
 
         @media (max-width: 768px) {{
@@ -323,9 +396,12 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
 
     <div class="lightbox" id="lightbox">
         <button class="close-btn" onclick="closeLightbox()">&times;</button>
+        <button class="nav-btn prev" id="prev-btn" onclick="navigateImage(-1)">‹</button>
+        <button class="nav-btn next" id="next-btn" onclick="navigateImage(1)">›</button>
         <div class="lightbox-controls">
             <button class="lightbox-btn" onclick="downloadImage()">Download</button>
         </div>
+        <div class="image-counter" id="image-counter">1 / 1</div>
         <div class="lightbox-content">
             <img class="lightbox-image" id="lightbox-img" src="" alt="">
         </div>
@@ -338,20 +414,59 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
 
         function openLightbox(index) {{
             currentImageIndex = index;
+            showImage(index);
+            document.getElementById('lightbox').classList.add('active');
+            updateNavButtons();
+            preloadAdjacentImages();
+        }}
+
+        function showImage(index) {{
             const image = images[index];
-            const lightbox = document.getElementById('lightbox');
             const lightboxImg = document.getElementById('lightbox-img');
+            const counter = document.getElementById('image-counter');
 
-            // Show loading
+            // Show preview immediately
             lightboxImg.src = `/api/album/${{albumId}}/image/${{image.preview_path}}`;
-            lightbox.classList.add('active');
 
-            // Preload full resolution
+            // Update counter
+            counter.textContent = `${{index + 1}} / ${{images.length}}`;
+
+            // Preload and swap to original
             const fullImg = new Image();
             fullImg.onload = () => {{
                 lightboxImg.src = fullImg.src;
             }};
             fullImg.src = `/api/album/${{albumId}}/image/${{image.original_path}}`;
+        }}
+
+        function navigateImage(direction) {{
+            const newIndex = currentImageIndex + direction;
+            if (newIndex >= 0 && newIndex < images.length) {{
+                currentImageIndex = newIndex;
+                showImage(newIndex);
+                updateNavButtons();
+                preloadAdjacentImages();
+            }}
+        }}
+
+        function updateNavButtons() {{
+            const prevBtn = document.getElementById('prev-btn');
+            const nextBtn = document.getElementById('next-btn');
+            prevBtn.disabled = currentImageIndex === 0;
+            nextBtn.disabled = currentImageIndex === images.length - 1;
+        }}
+
+        function preloadAdjacentImages() {{
+            // Preload next image
+            if (currentImageIndex < images.length - 1) {{
+                const nextImg = new Image();
+                nextImg.src = `/api/album/${{albumId}}/image/${{images[currentImageIndex + 1].original_path}}`;
+            }}
+            // Preload previous image
+            if (currentImageIndex > 0) {{
+                const prevImg = new Image();
+                prevImg.src = `/api/album/${{albumId}}/image/${{images[currentImageIndex - 1].original_path}}`;
+            }}
         }}
 
         function closeLightbox() {{
@@ -368,9 +483,18 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             document.body.removeChild(link);
         }}
 
-        // Close on escape key
+        // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {{
-            if (e.key === 'Escape') closeLightbox();
+            const lightbox = document.getElementById('lightbox');
+            if (!lightbox.classList.contains('active')) return;
+
+            if (e.key === 'Escape') {{
+                closeLightbox();
+            }} else if (e.key === 'ArrowLeft') {{
+                navigateImage(-1);
+            }} else if (e.key === 'ArrowRight') {{
+                navigateImage(1);
+            }}
         }});
 
         // Close on background click
