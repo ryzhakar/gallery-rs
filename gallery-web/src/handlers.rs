@@ -270,12 +270,19 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
         }}
 
         @media (max-width: 768px) {{
+            .bento-grid {{
+                flex-direction: column;
+                align-items: stretch;
+            }}
+
             .bento-item {{
-                max-height: 250px;
+                max-height: none;
+                width: 100%;
             }}
 
             .bento-item img {{
-                height: 250px;
+                width: 100%;
+                height: auto;
             }}
         }}
     </style>
