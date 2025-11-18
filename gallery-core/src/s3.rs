@@ -1,0 +1,139 @@
+use anyhow::{Context, Result};
+use aws_sdk_s3::{
+    primitives::ByteStream,
+    Client,
+};
+use std::path::Path;
+
+#[derive(Clone)]
+pub struct S3Client {
+    client: Client,
+    bucket: String,
+}
+
+impl S3Client {
+    pub async fn new(bucket: String) -> Result<Self> {
+        let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+        let client = Client::new(&config);
+
+        Ok(Self { client, bucket })
+    }
+
+    /// Upload a file to S3
+    pub async fn upload_file(&self, local_path: &Path, s3_key: &str) -> Result<()> {
+        let body = ByteStream::from_path(local_path)
+            .await
+            .context("Failed to read file")?;
+
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(s3_key)
+            .body(body)
+            .content_type(Self::guess_content_type(s3_key))
+            .send()
+            .await
+            .context("Failed to upload to S3")?;
+
+        Ok(())
+    }
+
+    /// Upload bytes to S3
+    pub async fn upload_bytes(&self, data: Vec<u8>, s3_key: &str) -> Result<()> {
+        let body = ByteStream::from(data);
+
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(s3_key)
+            .body(body)
+            .content_type(Self::guess_content_type(s3_key))
+            .send()
+            .await
+            .context("Failed to upload to S3")?;
+
+        Ok(())
+    }
+
+    /// Download a file from S3
+    pub async fn download_file(&self, s3_key: &str) -> Result<Vec<u8>> {
+        let response = self.client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(s3_key)
+            .send()
+            .await
+            .context("Failed to download from S3")?;
+
+        let data = response
+            .body
+            .collect()
+            .await
+            .context("Failed to read S3 object body")?;
+
+        Ok(data.to_vec())
+    }
+
+    /// Delete all objects with a prefix (album deletion)
+    pub async fn delete_prefix(&self, prefix: &str) -> Result<()> {
+        // List all objects with the prefix
+        let objects = self.client
+            .list_objects_v2()
+            .bucket(&self.bucket)
+            .prefix(prefix)
+            .send()
+            .await
+            .context("Failed to list objects")?;
+
+        // Delete each object
+        if let Some(contents) = objects.contents {
+            for object in contents {
+                if let Some(key) = object.key {
+                    self.client
+                        .delete_object()
+                        .bucket(&self.bucket)
+                        .key(&key)
+                        .send()
+                        .await
+                        .context(format!("Failed to delete {}", key))?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get public URL for an object (if bucket is public)
+    pub fn get_public_url(&self, s3_key: &str) -> String {
+        format!(
+            "https://{}.s3.amazonaws.com/{}",
+            self.bucket, s3_key
+        )
+    }
+
+    /// Check if object exists
+    pub async fn object_exists(&self, s3_key: &str) -> Result<bool> {
+        match self.client
+            .head_object()
+            .bucket(&self.bucket)
+            .key(s3_key)
+            .send()
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(_) => Ok(false),
+        }
+    }
+
+    fn guess_content_type(key: &str) -> &'static str {
+        if key.ends_with(".jpg") || key.ends_with(".jpeg") {
+            "image/jpeg"
+        } else if key.ends_with(".png") {
+            "image/png"
+        } else if key.ends_with(".json") {
+            "application/json"
+        } else {
+            "application/octet-stream"
+        }
+    }
+}

@@ -1,0 +1,23 @@
+[package]
+name = "gallery-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "gallery"
+path = "src/main.rs"
+
+[dependencies]
+gallery-core = { path = "../gallery-core" }
+
+anyhow.workspace = true
+tokio.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+image.workspace = true
+walkdir.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
