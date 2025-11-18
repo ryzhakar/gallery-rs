@@ -13,8 +13,23 @@ pub struct S3Client {
 
 impl S3Client {
     pub async fn new(bucket: String) -> Result<Self> {
-        let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
-        let client = Client::new(&config);
+        let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::latest());
+
+        // If AWS_ENDPOINT_URL is set, use it (for MinIO/LocalStack/etc)
+        if let Ok(endpoint_url) = std::env::var("AWS_ENDPOINT_URL") {
+            config_loader = config_loader.endpoint_url(&endpoint_url);
+        }
+
+        let config = config_loader.load().await;
+        let mut s3_config_builder = aws_sdk_s3::config::Builder::from(&config);
+
+        // For S3-compatible services, force path-style addressing
+        if std::env::var("AWS_ENDPOINT_URL").is_ok() {
+            s3_config_builder = s3_config_builder.force_path_style(true);
+        }
+
+        let s3_config = s3_config_builder.build();
+        let client = Client::from_conf(s3_config);
 
         Ok(Self { client, bucket })
     }
