@@ -27,12 +27,12 @@ pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result
     // This ensures the same set of images always produces the same album ID
     let album_id = compute_album_id(&image_paths);
 
-    println!("Album: {}", name);
-    println!("Album ID: {}", album_id);
+    println!("Album: {name}");
+    println!("Album ID: {album_id}");
     println!("Image set size: {}\n", image_paths.len());
 
     // Check if this album already exists
-    let manifest_key = format!("{}/manifest.json", album_id);
+    let manifest_key = format!("{album_id}/manifest.json");
     let existing_manifest = if s3.object_exists(&manifest_key).await? {
         println!("✓ Found existing album with this image set");
         println!("  Checking which images need to be uploaded...\n");
@@ -90,7 +90,7 @@ pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result
             // Check if this image already exists in the album
             if let Some(existing_info) = existing_images.get(&file_hash) {
                 pb.inc(1);
-                pb.set_message(format!("Skipped (exists): {}", filename));
+                pb.set_message(format!("Skipped (exists): {filename}"));
                 return Ok::<_, anyhow::Error>(ProcessResult::Existing(existing_info.clone()));
             }
 
@@ -99,7 +99,7 @@ pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result
             let processed = process_image(path)?;
 
             pb.inc(1);
-            pb.set_message(format!("Processed: {}", filename));
+            pb.set_message(format!("Processed: {filename}"));
 
             Ok(ProcessResult::New(image_id, filename, file_hash, processed))
         })
@@ -154,7 +154,7 @@ pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result
                     upload_image_to_s3(s3_clone, album_id_clone, image_id, filename.clone(), file_hash, processed)
                         .await;
                 pb_clone.inc(1);
-                pb_clone.set_message(format!("Uploaded: {}", filename));
+                pb_clone.set_message(format!("Uploaded: {filename}"));
                 result
             });
 
@@ -181,14 +181,14 @@ pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result
 
     // Upload manifest
     let manifest_json = manifest.to_json()?;
-    let manifest_key = format!("{}/manifest.json", album_id);
+    let manifest_key = format!("{album_id}/manifest.json");
     s3.upload_bytes(manifest_json.into_bytes(), &manifest_key)
         .await?;
 
     println!("✓ Album complete!");
-    println!("Album ID: {}", album_id);
+    println!("Album ID: {album_id}");
     println!("Total images: {}", manifest.images.len());
-    println!("\nAccess your gallery at: https://your-domain.com/gallery/{}", album_id);
+    println!("\nAccess your gallery at: https://your-domain.com/gallery/{album_id}");
 
     Ok(())
 }
@@ -202,15 +202,15 @@ async fn upload_image_to_s3(
     processed: ProcessedImage,
 ) -> Result<ImageInfo> {
     // Upload original
-    let original_key = format!("{}/originals/{}.jpg", album_id, image_id);
+    let original_key = format!("{album_id}/originals/{image_id}.jpg");
     s3.upload_bytes(processed.original, &original_key).await?;
 
     // Upload preview
-    let preview_key = format!("{}/previews/{}.jpg", album_id, image_id);
+    let preview_key = format!("{album_id}/previews/{image_id}.jpg");
     s3.upload_bytes(processed.preview, &preview_key).await?;
 
     // Upload thumbnail
-    let thumbnail_key = format!("{}/thumbnails/{}.jpg", album_id, image_id);
+    let thumbnail_key = format!("{album_id}/thumbnails/{image_id}.jpg");
     s3.upload_bytes(processed.thumbnail, &thumbnail_key).await?;
 
     Ok(ImageInfo::new(
@@ -236,7 +236,7 @@ fn compute_album_id(image_paths: &[PathBuf]) -> String {
     }
 
     let result = hasher.finalize();
-    format!("{:x}", result)[..16].to_string() // Use first 16 chars
+    format!("{result:x}")[..16].to_string() // Use first 16 chars
 }
 
 /// Hash a file's content
@@ -245,7 +245,7 @@ fn hash_file(path: &Path) -> Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(&file_content);
     let result = hasher.finalize();
-    Ok(format!("{:x}", result))
+    Ok(format!("{result:x}"))
 }
 
 fn collect_image_paths(paths: Vec<String>) -> Result<Vec<PathBuf>> {

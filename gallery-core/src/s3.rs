@@ -120,7 +120,7 @@ impl S3Client {
                         .key(&key)
                         .send()
                         .await
-                        .context(format!("Failed to delete {}", key))?;
+                        .context(format!("Failed to delete {key}"))?;
                 }
             }
         }

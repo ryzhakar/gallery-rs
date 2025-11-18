@@ -68,9 +68,9 @@ impl ImageInfo {
             width,
             height,
             file_hash,
-            thumbnail_path: format!("thumbnails/{}.jpg", image_id),
-            preview_path: format!("previews/{}.jpg", image_id),
-            original_path: format!("originals/{}.jpg", image_id),
+            thumbnail_path: format!("thumbnails/{image_id}.jpg"),
+            preview_path: format!("previews/{image_id}.jpg"),
+            original_path: format!("originals/{image_id}.jpg"),
         }
     }
 }

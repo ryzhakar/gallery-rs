@@ -50,28 +50,33 @@ pub async fn index() -> Html<&'static str> {
 pub async fn gallery(
     State(state): State<AppState>,
     Path(album_id): Path<String>,
-) -> Result<Html<String>, StatusCode> {
+) -> Html<String> {
     tracing::info!("Gallery page request: album_id={}", album_id);
 
     // Verify album exists by checking manifest
-    let manifest_key = format!("{}/manifest.json", album_id);
-    let manifest_data = state
-        .s3
-        .download_file(&manifest_key)
-        .await
-        .map_err(|e| {
+    let manifest_key = format!("{album_id}/manifest.json");
+    let manifest_data = match state.s3.download_file(&manifest_key).await {
+        Ok(data) => data,
+        Err(e) => {
             tracing::error!("Failed to fetch manifest for album {}: {:?}", album_id, e);
-            StatusCode::NOT_FOUND
-        })?;
+            return Html(generate_404_html());
+        }
+    };
 
-    let manifest_json = String::from_utf8(manifest_data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let manifest: AlbumManifest =
-        serde_json::from_str(&manifest_json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let manifest_json = match String::from_utf8(manifest_data) {
+        Ok(json) => json,
+        Err(_) => return Html(generate_404_html()),
+    };
+
+    let manifest: AlbumManifest = match serde_json::from_str(&manifest_json) {
+        Ok(m) => m,
+        Err(_) => return Html(generate_404_html()),
+    };
 
     // Generate HTML
     let html = generate_gallery_html(&album_id, &manifest);
 
-    Ok(Html(html))
+    Html(html)
 }
 
 /// Get album manifest JSON
@@ -81,7 +86,7 @@ pub async fn get_manifest(
 ) -> Result<Json<AlbumManifest>, StatusCode> {
     tracing::info!("Manifest API request: album_id={}", album_id);
 
-    let manifest_key = format!("{}/manifest.json", album_id);
+    let manifest_key = format!("{album_id}/manifest.json");
     let manifest_data = state
         .s3
         .download_file(&manifest_key)
@@ -105,7 +110,7 @@ pub async fn get_image(
 ) -> Result<Response, StatusCode> {
     tracing::info!("Image request: album_id={}, path={}", album_id, path);
 
-    let s3_key = format!("{}/{}", album_id, path);
+    let s3_key = format!("{album_id}/{path}");
     tracing::debug!("Computed S3 key: {}", s3_key);
 
     let image_data = state
@@ -409,4 +414,58 @@ fn html_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
+}
+
+fn generate_404_html() -> String {
+    r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gallery Not Found</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background: #ffffff;
+            color: #333;
+        }
+        .container {
+            text-align: center;
+            padding: 40px 20px;
+            max-width: 500px;
+        }
+        h1 {
+            font-size: 6rem;
+            font-weight: 300;
+            margin: 0;
+            color: #999;
+        }
+        p {
+            font-size: 1.2rem;
+            margin: 20px 0;
+            color: #666;
+        }
+        a {
+            color: #333;
+            text-decoration: none;
+            border-bottom: 1px solid #333;
+        }
+        a:hover {
+            border-bottom: 2px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>404</h1>
+        <p>This gallery doesn't exist or has expired.</p>
+        <p><a href="/">Return home</a></p>
+    </div>
+</body>
+</html>"#.to_string()
 }

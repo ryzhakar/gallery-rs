@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
         .with_state(state);
 
     // Start server
-    let addr = format!("0.0.0.0:{}", port);
+    let addr = format!("0.0.0.0:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     tracing::info!("Gallery web server listening on {}", addr);
