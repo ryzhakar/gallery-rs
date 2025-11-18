@@ -48,7 +48,7 @@ impl ImageInfo {
         original_filename: String,
         width: u32,
         height: u32,
-        album_id: &str,
+        _album_id: &str,
         image_id: &str,
     ) -> Self {
         Self {
@@ -56,9 +56,9 @@ impl ImageInfo {
             original_filename,
             width,
             height,
-            thumbnail_path: format!("{}/thumbnails/{}.jpg", album_id, image_id),
-            preview_path: format!("{}/previews/{}.jpg", album_id, image_id),
-            original_path: format!("{}/originals/{}.jpg", album_id, image_id),
+            thumbnail_path: format!("thumbnails/{}.jpg", image_id),
+            preview_path: format!("previews/{}.jpg", image_id),
+            original_path: format!("originals/{}.jpg", image_id),
         }
     }
 }
