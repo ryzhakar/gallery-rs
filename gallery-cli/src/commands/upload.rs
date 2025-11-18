@@ -84,6 +84,9 @@ pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result
                 .to_string_lossy()
                 .to_string();
 
+            // Show we're starting this file
+            pb.set_message(format!("Hashing: {filename}"));
+
             // Hash the file content
             let file_hash = hash_file(path)?;
 
@@ -95,6 +98,7 @@ pub async fn execute(paths: Vec<String>, name: String, bucket: String) -> Result
             }
 
             // Process the image (new or changed)
+            pb.set_message(format!("Processing: {filename}"));
             let image_id = Uuid::new_v4().to_string();
             let processed = process_image(path)?;
 
