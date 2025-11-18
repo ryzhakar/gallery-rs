@@ -158,21 +158,23 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             padding: 40px 20px;
         }}
 
-        /* Bento-style grid layout */
+        /* Centered justified gallery layout */
         .bento-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-            grid-auto-rows: 300px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 15px;
+            align-items: center;
         }}
 
         .bento-item {{
             position: relative;
-            overflow: hidden;
             cursor: pointer;
             background: #f5f5f5;
             border-radius: 4px;
             transition: transform 0.2s ease;
+            flex: 0 0 auto;
+            max-height: 300px;
         }}
 
         .bento-item:hover {{
@@ -180,20 +182,12 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             box-shadow: 0 8px 20px rgba(0,0,0,0.1);
         }}
 
-        /* Vary sizes for bento effect */
-        .bento-item:nth-child(3n+1) {{
-            grid-row: span 2;
-        }}
-
-        .bento-item:nth-child(5n+2) {{
-            grid-column: span 2;
-        }}
-
         .bento-item img {{
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
             display: block;
+            height: 300px;
+            width: auto;
+            object-fit: contain;
+            border-radius: 4px;
         }}
 
         /* Lightbox */
@@ -276,14 +270,12 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
         }}
 
         @media (max-width: 768px) {{
-            .bento-grid {{
-                grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-                grid-auto-rows: 250px;
-                gap: 15px;
+            .bento-item {{
+                max-height: 250px;
             }}
 
-            .bento-item:nth-child(5n+2) {{
-                grid-column: span 1;
+            .bento-item img {{
+                height: 250px;
             }}
         }}
     </style>
