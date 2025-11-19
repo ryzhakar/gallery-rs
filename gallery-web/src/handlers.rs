@@ -645,12 +645,11 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
 
         async function downloadImage() {{
             const image = images[currentImageIndex];
-            // Use proxy endpoint to avoid CORS issues with S3
-            const downloadUrl = `/api/album/${{albumId}}/image/${{image.original_path}}`;
+            const originalUrl = image.original_url || `/api/album/${{albumId}}/image/${{image.original_path}}`;
 
             try {{
-                // Fetch through proxy (uses browser cache, same-origin, no CORS issues)
-                const response = await fetch(downloadUrl);
+                // Fetch the image (uses browser cache, so no re-download)
+                const response = await fetch(originalUrl);
                 const blob = await response.blob();
 
                 // Create object URL and trigger download
@@ -666,8 +665,7 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
                 setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
             }} catch (error) {{
                 console.error('Download failed:', error);
-                // Fallback: try direct S3 URL
-                const originalUrl = image.original_url || downloadUrl;
+                // Fallback: open in new tab
                 window.open(originalUrl, '_blank');
             }}
         }}
