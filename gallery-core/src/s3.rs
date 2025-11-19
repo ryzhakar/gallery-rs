@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
 use aws_sdk_s3::{
     primitives::{ByteStream, DateTime},
+    presigning::PresigningConfig,
     Client,
 };
 use std::path::Path;
+use std::time::Duration;
 
 #[derive(Clone)]
 pub struct S3Client {
@@ -140,6 +142,22 @@ impl S3Client {
             "https://{}.s3.amazonaws.com/{}",
             self.bucket, s3_key
         )
+    }
+
+    /// Generate a presigned URL for an object (valid for specified duration)
+    pub async fn generate_presigned_url(&self, s3_key: &str, expires_in: Duration) -> Result<String> {
+        let presigning_config = PresigningConfig::expires_in(expires_in)
+            .context("Failed to create presigning config")?;
+
+        let presigned_request = self.client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(s3_key)
+            .presigned(presigning_config)
+            .await
+            .context("Failed to generate presigned URL")?;
+
+        Ok(presigned_request.uri().to_string())
     }
 
     /// Check if object exists

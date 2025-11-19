@@ -19,6 +19,12 @@ pub struct ImageInfo {
     pub thumbnail_path: String,
     pub preview_path: String,
     pub original_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_url: Option<String>,
 }
 
 impl AlbumManifest {
@@ -71,6 +77,9 @@ impl ImageInfo {
             thumbnail_path: format!("thumbnails/{image_id}.jpg"),
             preview_path: format!("previews/{image_id}.jpg"),
             original_path: format!("originals/{image_id}.jpg"),
+            thumbnail_url: None,
+            preview_url: None,
+            original_url: None,
         }
     }
 }
