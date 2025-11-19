@@ -643,14 +643,31 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             document.body.classList.remove('lightbox-open');
         }}
 
-        function downloadImage() {{
+        async function downloadImage() {{
             const image = images[currentImageIndex];
-            const link = document.createElement('a');
-            link.href = image.original_url || `/api/album/${{albumId}}/image/${{image.original_path}}`;
-            link.download = image.original_filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            const originalUrl = image.original_url || `/api/album/${{albumId}}/image/${{image.original_path}}`;
+
+            try {{
+                // Fetch the image (uses browser cache, so no re-download)
+                const response = await fetch(originalUrl);
+                const blob = await response.blob();
+
+                // Create object URL and trigger download
+                const blobUrl = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = blobUrl;
+                link.download = image.original_filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                // Clean up object URL after a short delay
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+            }} catch (error) {{
+                console.error('Download failed:', error);
+                // Fallback: open in new tab
+                window.open(originalUrl, '_blank');
+            }}
         }}
 
         // Keyboard shortcuts
