@@ -165,7 +165,9 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>{album_name} - Film Gallery</title>
     <style>
         * {{
@@ -179,6 +181,14 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             background: #ffffff;
             color: #333;
             line-height: 1.6;
+            /* Safe area insets for notched devices */
+            padding-top: env(safe-area-inset-top);
+        }}
+
+        body.lightbox-open {{
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
         }}
 
         .header {{
@@ -277,6 +287,8 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             object-fit: contain;
             user-select: none;
             transition: opacity 0.2s ease;
+            touch-action: pan-x pan-y;
+            -webkit-touch-callout: none;
         }}
 
         /* Navigation arrows */
@@ -335,6 +347,9 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             display: flex;
             gap: 10px;
             z-index: 1001;
+            /* Safe area for notched devices */
+            top: max(20px, env(safe-area-inset-top));
+            right: max(20px, env(safe-area-inset-right));
         }}
 
         .lightbox-btn {{
@@ -348,10 +363,15 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             transition: all 0.2s ease;
             backdrop-filter: blur(10px);
             font-weight: 500;
+            min-height: 44px;
         }}
 
         .lightbox-btn:hover {{
             background: rgba(255, 255, 255, 0.2);
+        }}
+
+        .lightbox-btn:active {{
+            transform: scale(0.95);
         }}
 
         .close-btn {{
@@ -372,10 +392,17 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             display: flex;
             align-items: center;
             justify-content: center;
+            /* Safe area for notched devices */
+            top: max(20px, env(safe-area-inset-top));
+            left: max(20px, env(safe-area-inset-left));
         }}
 
         .close-btn:hover {{
             background: rgba(255, 255, 255, 0.2);
+        }}
+
+        .close-btn:active {{
+            transform: scale(0.95);
         }}
 
         /* Image counter */
@@ -392,9 +419,15 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             z-index: 1001;
             backdrop-filter: blur(10px);
             font-weight: 500;
+            /* Safe area for devices with bottom insets */
+            bottom: max(30px, env(safe-area-inset-bottom));
         }}
 
         @media (max-width: 768px) {{
+            .header h1 {{
+                font-size: 2rem;
+            }}
+
             .bento-grid {{
                 flex-direction: column;
                 align-items: stretch;
@@ -413,6 +446,22 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             /* Hide navigation arrows on mobile - use swipe instead */
             .nav-btn {{
                 display: none;
+            }}
+
+            /* Larger touch targets on mobile */
+            .close-btn {{
+                width: 48px;
+                height: 48px;
+            }}
+
+            .lightbox-btn {{
+                min-height: 48px;
+                padding: 14px 24px;
+            }}
+
+            .image-counter {{
+                font-size: 1rem;
+                padding: 10px 24px;
             }}
         }}
     </style>
@@ -477,6 +526,7 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             currentImageIndex = index;
             showImage(index);
             document.getElementById('lightbox').classList.add('active');
+            document.body.classList.add('lightbox-open');
             updateNavButtons();
             preloadAdjacentImages();
         }}
@@ -590,6 +640,7 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
 
         function closeLightbox() {{
             document.getElementById('lightbox').classList.remove('active');
+            document.body.classList.remove('lightbox-open');
         }}
 
         function downloadImage() {{
