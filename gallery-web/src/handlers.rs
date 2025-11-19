@@ -131,6 +131,7 @@ pub async fn get_manifest(
 pub async fn get_image(
     State(state): State<AppState>,
     Path((album_id, path)): Path<(String, String)>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Response, StatusCode> {
     tracing::info!("Image request: album_id={}, path={}", album_id, path);
 
@@ -156,7 +157,24 @@ pub async fn get_image(
     };
 
     tracing::debug!("Serving image: s3_key={}, content_type={}, size={} bytes", s3_key, content_type, image_data.len());
-    Ok(([(header::CONTENT_TYPE, content_type)], image_data).into_response())
+
+    // Check if download is requested
+    let is_download = params.get("download").map(|v| v == "true").unwrap_or(false);
+
+    if is_download {
+        // Extract filename from path
+        let filename = path.split('/').next_back().unwrap_or("image.jpg");
+        Ok((
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CONTENT_DISPOSITION, &format!("attachment; filename=\"{filename}\"")),
+            ],
+            image_data,
+        )
+            .into_response())
+    } else {
+        Ok(([(header::CONTENT_TYPE, content_type)], image_data).into_response())
+    }
 }
 
 fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
@@ -643,31 +661,18 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             document.body.classList.remove('lightbox-open');
         }}
 
-        async function downloadImage() {{
+        function downloadImage() {{
             const image = images[currentImageIndex];
-            const originalUrl = image.original_url || `/api/album/${{albumId}}/image/${{image.original_path}}`;
+            // Use proxy endpoint with download parameter to get proper Content-Disposition header
+            const downloadUrl = `/api/album/${{albumId}}/image/${{image.original_path}}?download=true`;
 
-            try {{
-                // Fetch the image (uses browser cache, so no re-download)
-                const response = await fetch(originalUrl);
-                const blob = await response.blob();
-
-                // Create object URL and trigger download
-                const blobUrl = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = blobUrl;
-                link.download = image.original_filename;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-
-                // Clean up object URL after a short delay
-                setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
-            }} catch (error) {{
-                console.error('Download failed:', error);
-                // Fallback: open in new tab
-                window.open(originalUrl, '_blank');
-            }}
+            // Create temporary link and trigger download
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = image.original_filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }}
 
         // Keyboard shortcuts
