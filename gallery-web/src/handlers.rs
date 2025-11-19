@@ -222,6 +222,11 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             width: auto;
             object-fit: contain;
             border-radius: 4px;
+            transition: opacity 0.3s ease;
+        }}
+
+        .bento-item img.loading {{
+            opacity: 0.7;
         }}
 
         /* Lightbox */
@@ -247,18 +252,19 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
 
         .lightbox-content {{
             position: relative;
-            max-width: 90%;
-            max-height: 90%;
+            width: 90vw;
+            height: 90vh;
             display: flex;
             align-items: center;
             justify-content: center;
         }}
 
         .lightbox-image {{
-            max-width: 100%;
-            max-height: 90vh;
+            width: 100%;
+            height: 100%;
             object-fit: contain;
             user-select: none;
+            transition: opacity 0.2s ease;
         }}
 
         /* Navigation arrows */
@@ -432,20 +438,25 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
         // Track which images have which tiers loaded
         const loadedTiers = {{}};
 
+        // Cache for preloaded Image objects to prevent garbage collection
+        const imageCache = {{}};
+
         // Progressive enhancement: upgrade thumbnails to previews in the gallery
         document.addEventListener('DOMContentLoaded', () => {{
             images.forEach((image, index) => {{
-                if (image.preview_url) {{
-                    const thumbImg = document.querySelector(`#gallery .bento-item:nth-child(${{index + 1}}) img`);
-                    if (thumbImg) {{
-                        const previewImg = new Image();
-                        previewImg.onload = () => {{
-                            thumbImg.src = previewImg.src;
-                            if (!loadedTiers[index]) loadedTiers[index] = {{}};
-                            loadedTiers[index].preview = true;
-                        }};
-                        previewImg.src = image.preview_url;
-                    }}
+                const previewUrl = image.preview_url || `/api/album/${{albumId}}/image/${{image.preview_path}}`;
+                const thumbImg = document.querySelector(`img[data-index="${{index}}"]`);
+
+                if (thumbImg && previewUrl) {{
+                    const previewImg = new Image();
+                    previewImg.onload = () => {{
+                        // Direct swap - no flashing fade animation
+                        thumbImg.src = previewImg.src;
+
+                        if (!loadedTiers[index]) loadedTiers[index] = {{}};
+                        loadedTiers[index].preview = true;
+                    }};
+                    previewImg.src = previewUrl;
                 }}
             }});
         }});
@@ -463,27 +474,61 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             const lightboxImg = document.getElementById('lightbox-img');
             const counter = document.getElementById('image-counter');
 
-            // Use best available tier: preview if already loaded, otherwise thumbnail
             const tiers = loadedTiers[index] || {{}};
-            let initialSrc = image.thumbnail_url || `/api/album/${{albumId}}/image/${{image.thumbnail_path}}`;
-
-            if (tiers.preview && image.preview_url) {{
-                initialSrc = image.preview_url;
-            }}
-
-            // Show best available tier immediately
-            lightboxImg.src = initialSrc;
+            const originalUrl = image.original_url || `/api/album/${{albumId}}/image/${{image.original_path}}`;
+            const previewUrl = image.preview_url || `/api/album/${{albumId}}/image/${{image.preview_path}}`;
+            const thumbnailUrl = image.thumbnail_url || `/api/album/${{albumId}}/image/${{image.thumbnail_path}}`;
 
             // Update counter
             counter.textContent = `${{index + 1}} / ${{images.length}}`;
 
+            // If original is already loaded, show it immediately - no re-download
+            if (tiers.original) {{
+                lightboxImg.style.opacity = '1';
+                lightboxImg.src = originalUrl;
+                return;
+            }}
+
+            // Determine best available tier to show while loading original
+            let initialSrc = thumbnailUrl;
+            if (tiers.preview || image.preview_url) {{
+                initialSrc = previewUrl;
+            }}
+
+            // Show best available tier immediately
+            lightboxImg.style.opacity = '1';
+            lightboxImg.src = initialSrc;
+
+            // If showing thumbnail and preview not loaded yet, load preview first
+            if (initialSrc === thumbnailUrl && !tiers.preview && previewUrl) {{
+                const previewImg = new Image();
+                previewImg.onload = () => {{
+                    lightboxImg.style.opacity = '0.3';
+                    setTimeout(() => {{
+                        lightboxImg.src = previewImg.src;
+                        lightboxImg.style.opacity = '1';
+                    }}, 50);
+                    if (!loadedTiers[index]) loadedTiers[index] = {{}};
+                    loadedTiers[index].preview = true;
+                }};
+                previewImg.src = previewUrl;
+            }}
+
             // Load original in background and swap when ready
-            const originalUrl = image.original_url || `/api/album/${{albumId}}/image/${{image.original_path}}`;
             const fullImg = new Image();
             fullImg.onload = () => {{
-                lightboxImg.src = fullImg.src;
+                // Smooth transition to full-res
+                lightboxImg.style.opacity = '0.5';
+                setTimeout(() => {{
+                    lightboxImg.src = fullImg.src;
+                    lightboxImg.style.opacity = '1';
+                }}, 50);
                 if (!loadedTiers[index]) loadedTiers[index] = {{}};
                 loadedTiers[index].original = true;
+
+                // Cache the image object to prevent garbage collection
+                if (!imageCache[index]) imageCache[index] = {{}};
+                imageCache[index].original = fullImg;
             }};
             fullImg.src = originalUrl;
         }}
@@ -510,12 +555,21 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             [-1, 1].forEach(offset => {{
                 const idx = currentImageIndex + offset;
                 if (idx >= 0 && idx < images.length) {{
+                    const tiers = loadedTiers[idx] || {{}};
+
+                    // Skip if already loaded
+                    if (tiers.original) return;
+
                     const img = images[idx];
                     const originalUrl = img.original_url || `/api/album/${{albumId}}/image/${{img.original_path}}`;
                     const preloadImg = new Image();
                     preloadImg.onload = () => {{
                         if (!loadedTiers[idx]) loadedTiers[idx] = {{}};
                         loadedTiers[idx].original = true;
+
+                        // Store in cache to prevent garbage collection
+                        if (!imageCache[idx]) imageCache[idx] = {{}};
+                        imageCache[idx].original = preloadImg;
                     }};
                     preloadImg.src = originalUrl;
                 }}
@@ -610,7 +664,7 @@ fn generate_thumbnails_html(album_id: &str, manifest: &AlbumManifest) -> String 
 
             format!(
                 r#"<div class="bento-item" onclick="openLightbox({index})">
-                <img src="{thumbnail_src}" alt="{filename}" loading="lazy">
+                <img data-index="{index}" src="{thumbnail_src}" alt="{filename}" loading="lazy">
             </div>"#,
                 index = index,
                 thumbnail_src = html_escape(&thumbnail_src),
