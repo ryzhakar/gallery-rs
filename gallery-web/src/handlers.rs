@@ -68,10 +68,22 @@ pub async fn gallery(
         Err(_) => return Html(generate_404_html()),
     };
 
-    let manifest: AlbumManifest = match serde_json::from_str(&manifest_json) {
+    let mut manifest: AlbumManifest = match serde_json::from_str(&manifest_json) {
         Ok(m) => m,
         Err(_) => return Html(generate_404_html()),
     };
+
+    // Generate presigned URLs for direct S3 access (valid for 7 days to match object expiration)
+    let expires_in = std::time::Duration::from_secs(7 * 24 * 3600);
+    for image in &mut manifest.images {
+        let thumbnail_key = format!("{album_id}/{}", image.thumbnail_path);
+        let preview_key = format!("{album_id}/{}", image.preview_path);
+        let original_key = format!("{album_id}/{}", image.original_path);
+
+        image.thumbnail_url = state.s3.generate_presigned_url(&thumbnail_key, expires_in).await.ok();
+        image.preview_url = state.s3.generate_presigned_url(&preview_key, expires_in).await.ok();
+        image.original_url = state.s3.generate_presigned_url(&original_key, expires_in).await.ok();
+    }
 
     // Generate HTML
     let html = generate_gallery_html(&album_id, &manifest);
@@ -100,8 +112,8 @@ pub async fn get_manifest(
     let mut manifest: AlbumManifest =
         serde_json::from_str(&manifest_json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Generate presigned URLs for all images (valid for 1 hour)
-    let expires_in = std::time::Duration::from_secs(3600);
+    // Generate presigned URLs for all images (valid for 7 days to match object expiration)
+    let expires_in = std::time::Duration::from_secs(7 * 24 * 3600);
     for image in &mut manifest.images {
         let thumbnail_key = format!("{album_id}/{}", image.thumbnail_path);
         let preview_key = format!("{album_id}/{}", image.preview_path);
