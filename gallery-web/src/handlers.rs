@@ -97,8 +97,20 @@ pub async fn get_manifest(
         })?;
 
     let manifest_json = String::from_utf8(manifest_data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let manifest: AlbumManifest =
+    let mut manifest: AlbumManifest =
         serde_json::from_str(&manifest_json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Generate presigned URLs for all images (valid for 1 hour)
+    let expires_in = std::time::Duration::from_secs(3600);
+    for image in &mut manifest.images {
+        let thumbnail_key = format!("{album_id}/{}", image.thumbnail_path);
+        let preview_key = format!("{album_id}/{}", image.preview_path);
+        let original_key = format!("{album_id}/{}", image.original_path);
+
+        image.thumbnail_url = state.s3.generate_presigned_url(&thumbnail_key, expires_in).await.ok();
+        image.preview_url = state.s3.generate_presigned_url(&preview_key, expires_in).await.ok();
+        image.original_url = state.s3.generate_presigned_url(&original_key, expires_in).await.ok();
+    }
 
     Ok(Json(manifest))
 }
@@ -379,6 +391,11 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
                 width: 100%;
                 height: auto;
             }}
+
+            /* Hide navigation arrows on mobile - use swipe instead */
+            .nav-btn {{
+                display: none;
+            }}
         }}
     </style>
 </head>
@@ -412,6 +429,27 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
         const images = {images_json};
         let currentImageIndex = 0;
 
+        // Track which images have which tiers loaded
+        const loadedTiers = {{}};
+
+        // Progressive enhancement: upgrade thumbnails to previews in the gallery
+        document.addEventListener('DOMContentLoaded', () => {{
+            images.forEach((image, index) => {{
+                if (image.preview_url) {{
+                    const thumbImg = document.querySelector(`#gallery .bento-item:nth-child(${{index + 1}}) img`);
+                    if (thumbImg) {{
+                        const previewImg = new Image();
+                        previewImg.onload = () => {{
+                            thumbImg.src = previewImg.src;
+                            if (!loadedTiers[index]) loadedTiers[index] = {{}};
+                            loadedTiers[index].preview = true;
+                        }};
+                        previewImg.src = image.preview_url;
+                    }}
+                }}
+            }});
+        }});
+
         function openLightbox(index) {{
             currentImageIndex = index;
             showImage(index);
@@ -425,18 +463,29 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
             const lightboxImg = document.getElementById('lightbox-img');
             const counter = document.getElementById('image-counter');
 
-            // Show preview immediately
-            lightboxImg.src = `/api/album/${{albumId}}/image/${{image.preview_path}}`;
+            // Use best available tier: preview if already loaded, otherwise thumbnail
+            const tiers = loadedTiers[index] || {{}};
+            let initialSrc = image.thumbnail_url || `/api/album/${{albumId}}/image/${{image.thumbnail_path}}`;
+
+            if (tiers.preview && image.preview_url) {{
+                initialSrc = image.preview_url;
+            }}
+
+            // Show best available tier immediately
+            lightboxImg.src = initialSrc;
 
             // Update counter
             counter.textContent = `${{index + 1}} / ${{images.length}}`;
 
-            // Preload and swap to original
+            // Load original in background and swap when ready
+            const originalUrl = image.original_url || `/api/album/${{albumId}}/image/${{image.original_path}}`;
             const fullImg = new Image();
             fullImg.onload = () => {{
                 lightboxImg.src = fullImg.src;
+                if (!loadedTiers[index]) loadedTiers[index] = {{}};
+                loadedTiers[index].original = true;
             }};
-            fullImg.src = `/api/album/${{albumId}}/image/${{image.original_path}}`;
+            fullImg.src = originalUrl;
         }}
 
         function navigateImage(direction) {{
@@ -457,16 +506,20 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
         }}
 
         function preloadAdjacentImages() {{
-            // Preload next image
-            if (currentImageIndex < images.length - 1) {{
-                const nextImg = new Image();
-                nextImg.src = `/api/album/${{albumId}}/image/${{images[currentImageIndex + 1].original_path}}`;
-            }}
-            // Preload previous image
-            if (currentImageIndex > 0) {{
-                const prevImg = new Image();
-                prevImg.src = `/api/album/${{albumId}}/image/${{images[currentImageIndex - 1].original_path}}`;
-            }}
+            // Preload next and previous originals
+            [-1, 1].forEach(offset => {{
+                const idx = currentImageIndex + offset;
+                if (idx >= 0 && idx < images.length) {{
+                    const img = images[idx];
+                    const originalUrl = img.original_url || `/api/album/${{albumId}}/image/${{img.original_path}}`;
+                    const preloadImg = new Image();
+                    preloadImg.onload = () => {{
+                        if (!loadedTiers[idx]) loadedTiers[idx] = {{}};
+                        loadedTiers[idx].original = true;
+                    }};
+                    preloadImg.src = originalUrl;
+                }}
+            }});
         }}
 
         function closeLightbox() {{
@@ -476,7 +529,7 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
         function downloadImage() {{
             const image = images[currentImageIndex];
             const link = document.createElement('a');
-            link.href = `/api/album/${{albumId}}/image/${{image.original_path}}`;
+            link.href = image.original_url || `/api/album/${{albumId}}/image/${{image.original_path}}`;
             link.download = image.original_filename;
             document.body.appendChild(link);
             link.click();
@@ -501,6 +554,35 @@ fn generate_gallery_html(album_id: &str, manifest: &AlbumManifest) -> String {
         document.getElementById('lightbox').addEventListener('click', (e) => {{
             if (e.target.id === 'lightbox') closeLightbox();
         }});
+
+        // Mobile swipe navigation
+        let touchStartX = 0;
+        let touchEndX = 0;
+        const lightboxContent = document.querySelector('.lightbox-content');
+
+        lightboxContent.addEventListener('touchstart', (e) => {{
+            touchStartX = e.changedTouches[0].screenX;
+        }}, false);
+
+        lightboxContent.addEventListener('touchend', (e) => {{
+            touchEndX = e.changedTouches[0].screenX;
+            handleSwipe();
+        }}, false);
+
+        function handleSwipe() {{
+            const swipeThreshold = 50;
+            const diff = touchStartX - touchEndX;
+
+            if (Math.abs(diff) > swipeThreshold) {{
+                if (diff > 0) {{
+                    // Swiped left - next image
+                    navigateImage(1);
+                }} else {{
+                    // Swiped right - previous image
+                    navigateImage(-1);
+                }}
+            }}
+        }}
     </script>
 </body>
 </html>"#,
@@ -518,13 +600,20 @@ fn generate_thumbnails_html(album_id: &str, manifest: &AlbumManifest) -> String 
         .iter()
         .enumerate()
         .map(|(index, image)| {
+            let thumbnail_src = image
+                .thumbnail_url
+                .clone()
+                .unwrap_or_else(|| {
+                    // Fallback to proxigned URL if presigned URL not available
+                    format!("/api/album/{}/image/{}", album_id, image.thumbnail_path)
+                });
+
             format!(
                 r#"<div class="bento-item" onclick="openLightbox({index})">
-                <img src="/api/album/{album_id}/image/{thumbnail_path}" alt="{filename}" loading="lazy">
+                <img src="{thumbnail_src}" alt="{filename}" loading="lazy">
             </div>"#,
                 index = index,
-                album_id = album_id,
-                thumbnail_path = image.thumbnail_path,
+                thumbnail_src = html_escape(&thumbnail_src),
                 filename = html_escape(&image.original_filename),
             )
         })
